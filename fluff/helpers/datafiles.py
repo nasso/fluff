@@ -185,6 +185,20 @@ def toss_userlog(sid, uid, issuer, mlink, cid):
     set_guildfile(sid, "userlog", json.dumps(userlogs))
     return len(userlogs[uid]["tosses"])
 
+def rulepush_userlog(guild_id: int, user_id: int, issuer_id: int, msg_url: str, channel_id: int):
+    userlogs, user_id_str = fill_userlog(guild_id, user_id)
+
+    rulepush_data = {
+        "issuer_id": issuer_id,
+        "session_id": channel_id,
+        "post_link": msg_url,
+        "timestamp": int(datetime.datetime.now().timestamp()),
+    }
+    if "rulepushes" not in userlogs[user_id_str]:
+        userlogs[user_id_str]["rulepushes"] = []
+    userlogs[user_id_str]["rulepushes"].append(rulepush_data)
+    set_guildfile(guild_id, "userlog", json.dumps(userlogs))
+    return len(userlogs[user_id_str]["rulepushes"])
 
 def watch_userlog(sid, uid, issuer, watch_state, tracker_thread=None, tracker_msg=None):
     userlogs, uid = fill_userlog(sid, uid)

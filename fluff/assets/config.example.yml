@@ -89,6 +89,9 @@ rulepush:
   # Introductory message for rulepush channels.
   rulepushtopic:
 
+  # Message for rulepushes
+  rulepushmsg: 
+
 reaction:
   # If the bot may automatically adjust names to be readable.
   autoreadableenable: 
