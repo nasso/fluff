@@ -1,3 +1,5 @@
+from itertools import zip_longest
+import re
 import asyncio
 import os
 import zipfile
@@ -422,7 +424,7 @@ class RulePush(Cog):
     @commands.check(ismod)
     @commands.guild_only()
     @commands.command(name="rp-close")
-    async def close(self, ctx, archive=True):
+    async def close(self, ctx: commands.Context, archive=True):
         """This closes a rulepush session.
 
         Please refer to the tossing section of the [documentation](https://3gou.0ccu.lt/as-a-moderator/the-tossing-system/).
@@ -430,6 +432,12 @@ class RulePush(Cog):
 
         - No arguments.
         """
+        assert ctx.guild != None
+        assert not isinstance(ctx.channel, discord.DMChannel)
+        assert not isinstance(ctx.channel, discord.Thread)
+        assert not isinstance(ctx.channel, discord.PartialMessageable)
+        assert not isinstance(ctx.channel, discord.GroupChannel)
+
         if not self.enabled(ctx.guild):
             return await ctx.reply(self.nocfgmsg, mention_author=False)
         if ctx.channel.name not in get_config(ctx.guild.id, "rulepush", "rulepushchannels"):
@@ -551,6 +559,101 @@ class RulePush(Cog):
         if channel:
             await channel.send(embed=embed)
             await ctx.channel.delete(reason="Fluff Rulepush")
+
+    @commands.bot_has_permissions(embed_links=True, add_reactions=True)
+    @commands.check(ismod)
+    @commands.guild_only()
+    @commands.command(name="rewrite-rules")
+    async def rewrite_rules(self, ctx: commands.Context, force=True):
+        """This rewrites the rules channel.
+
+        - No arguments.
+        """
+        assert ctx.guild != None
+        assert not isinstance(ctx.channel, discord.DMChannel)
+        assert not isinstance(ctx.channel, discord.Thread)
+        assert not isinstance(ctx.channel, discord.PartialMessageable)
+        assert not isinstance(ctx.channel, discord.GroupChannel)
+
+        config_dir = f"data/servers/{ctx.guild.id}/rule-channels"
+
+        notify_channel = self.bot.pull_channel(
+            ctx.guild, get_config(ctx.guild.id, "staff", "staffchannel")
+        )
+
+        if not os.path.isdir(config_dir):
+            if force:
+                await ctx.message.add_reaction("🚫")
+                await ctx.reply("No `rule-channels/` directory", mention_author=False)
+            else:
+                await notify_channel.send(
+                    f"Rules not updated: `{config_dir}` does not exist or isn't a directory"
+                )
+            return
+
+        config_files = [
+            f
+            for f in os.listdir(config_dir)
+            if os.path.isfile(os.path.join(config_dir, f))
+        ]
+
+        await ctx.message.add_reaction("⏳")
+
+        pat = re.compile(r"^(\d+)\.md$")
+        for fname in config_files:
+            m = pat.search(fname)
+            if not m:
+                continue
+            rules_chan = self.bot.pull_channel(ctx.guild, int(m.group(1)))
+            assert isinstance(rules_chan, discord.TextChannel)
+
+            # read the complete rules from the file (split by line for now)
+            with open(os.path.join(config_dir, fname)) as f:
+                rule_lines = f.readlines()
+
+            # combine lines we want to keep in the same message
+            rule_parts: list[str] = []
+            for line in rule_lines:
+                prev = rule_parts[-1] if len(rule_parts) > 0 else None
+
+                if prev != None:
+                    if prev.startswith("> ") and line.startswith("> "):
+                        rule_parts[-1] += line
+                        continue
+
+                rule_parts.append(line)
+
+            # break it down so that it fits into individual messages
+            rules_messages = [""]
+            for part in rule_parts:
+                if len(rules_messages[-1]) + len(part) > 1800:
+                    rules_messages.append(part)
+                else:
+                    rules_messages[-1] += part
+
+            # find existing messages
+            existing_messages = [
+                msg
+                async for msg in rules_chan.history(oldest_first=True)
+                if msg.author.id == self.bot.application_id
+            ]
+
+            # update the messages
+            for (new_msg, cur_msg) in zip_longest(rules_messages,
+                                                  existing_messages,
+                                                  fillvalue=None):
+                if cur_msg == None:
+                    # we ran out of existing messages to edit: send a new one!
+                    await rules_chan.send(new_msg)
+                elif new_msg == None:
+                    # no more messages! delete all other pre-existing messages
+                    await cur_msg.delete()
+                else:
+                    # existing message available, edit it!
+                    await cur_msg.edit(content=new_msg)
+
+        await ctx.message.remove_reaction("⏳", self.bot.user)
+        await ctx.message.add_reaction("✅")
 
     def get_session(self, member: discord.Member):
         rulepushes = get_tossfile(member.guild.id, "rulepushes")
