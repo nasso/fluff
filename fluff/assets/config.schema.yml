@@ -147,6 +147,14 @@ properties:
           - "null"
       rulepushmsg:
         type: string
+      codewords_min:
+        type: integer
+      codewords_max:
+        type: integer
+      codewords:
+        type: array
+        items:
+          type: string
   reaction:
     type: object
     properties:

@@ -1,4 +1,4 @@
-from itertools import zip_longest
+import random
 import re
 import asyncio
 import os
@@ -6,6 +6,7 @@ import zipfile
 import discord
 import json
 
+from itertools import zip_longest
 from typing import Union
 from discord.ext import commands
 from discord.ext.commands import Cog
@@ -580,6 +581,9 @@ class RulePush(Cog):
         notify_channel = self.bot.pull_channel(
             ctx.guild, get_config(ctx.guild.id, "staff", "staffchannel")
         )
+        codewords_min = int(get_config(ctx.guild.id, "rulepush", "codewords_min"))
+        codewords_max = int(get_config(ctx.guild.id, "rulepush", "codewords_max"))
+        all_codewords = [str(w) for w in get_config(ctx.guild.id, "rulepush", "codewords")]
 
         if not os.path.isdir(config_dir):
             if force:
@@ -599,17 +603,58 @@ class RulePush(Cog):
 
         await ctx.message.add_reaction("⏳")
 
+        used_codewords: dict[int, list[str]] = {}
+
         pat = re.compile(r"^(\d+)\.md$")
+        between_sentences_pat = re.compile(r"[\.!\?] +\w")
+        between_words_pat = re.compile(r"\w +\w")
         for fname in config_files:
             m = pat.search(fname)
             if not m:
                 continue
-            rules_chan = self.bot.pull_channel(ctx.guild, int(m.group(1)))
+            rules_chan_id = int(m.group(1))
+            rules_chan = self.bot.pull_channel(ctx.guild, rules_chan_id)
             assert isinstance(rules_chan, discord.TextChannel)
 
-            # read the complete rules from the file (split by line for now)
+            used_codewords[rules_chan_id] = []
+
+            codewords = random.sample(
+                all_codewords,
+                random.randrange(codewords_min, codewords_max + 1)
+            )
+
+            # read the complete rules from the file (split by line)
             with open(os.path.join(config_dir, fname)) as f:
                 rule_lines = f.readlines()
+
+            # pick the lines that will get a codeword (only lines > 70 chars)
+            codewords_line_numbers = random.sample(
+                [i for i, l in enumerate(rule_lines) if len(l) > 70],
+                len(codewords)
+            )
+            for codeword, idx in zip(codewords, codewords_line_numbers):
+                line = rule_lines[idx]
+                insert_pat = random.choices(
+                    population=[between_sentences_pat, between_words_pat],
+                    weights=[0.9, 0.1],
+                    k=1
+                )[0]
+                candidates = list(insert_pat.finditer(line))
+                if len(candidates) == 0:
+                    insert_pat = between_words_pat
+                    candidates = list(insert_pat.finditer(line))
+                if len(candidates) == 0:
+                    # rip, we can't insert it here
+                    continue
+
+                candidate = random.choice(candidates)
+                rule_lines[idx] = line[:candidate.start() + 1]
+                if insert_pat == between_sentences_pat:
+                    rule_lines[idx] += f" {codeword.title()}. "
+                else:
+                    rule_lines[idx] += f" – {codeword} – "
+                rule_lines[idx] += line[candidate.end() - 1:]
+                used_codewords[rules_chan_id].append(codeword)
 
             # combine lines we want to keep in the same message
             rule_parts: list[str] = []
@@ -651,6 +696,8 @@ class RulePush(Cog):
                 else:
                     # existing message available, edit it!
                     await cur_msg.edit(content=new_msg)
+
+        set_tossfile(ctx.guild.id, "rule-codewords", json.dumps(used_codewords))
 
         await ctx.message.remove_reaction("⏳", self.bot.user)
         await ctx.message.add_reaction("✅")

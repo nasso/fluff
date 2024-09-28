@@ -92,6 +92,18 @@ rulepush:
   # Message for rulepushes
   rulepushmsg: 
 
+  # Minimum number of codewords in each rule channel
+  codewords_min: 3
+
+  # Maximum number of codewords in each rule channel
+  codewords_max: 5
+
+  # Codeword list
+  codewords:
+    - foo
+    - bar
+    - baz
+
 reaction:
   # If the bot may automatically adjust names to be readable.
   autoreadableenable: 
