@@ -147,6 +147,16 @@ properties:
           - "null"
       rulepushmsg:
         type: string
+      codeword_ok:
+        type: string
+      codeword_ko:
+        type: string
+      codewords_done:
+        type: string
+      codewords_done_timeout_secs:
+        type: integer
+      codewords_not_done:
+        type: string
       codewords_min:
         type: integer
       codewords_max:

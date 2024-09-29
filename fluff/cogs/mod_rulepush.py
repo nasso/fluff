@@ -25,6 +25,7 @@ class RulePush(Cog):
         self.bot = bot
         self.poketimers = dict()
         self.nocfgmsg = "Rule-pushing isn't enabled for this server."
+        self.guild_rulepushes: dict[int, set[int]] = dict()
 
     def enabled(self, g):
         return all(
@@ -311,6 +312,7 @@ class RulePush(Cog):
             if us.id not in rulepushes[ctx.channel.name]["rulepulled"]:
                 rulepushes[ctx.channel.name]["rulepulled"].append(us.id)
             del rulepushes[ctx.channel.name]["rulepushed"][str(us.id)]
+            self.guild_rulepushes[ctx.guild.id].discard(us.id)
 
             if roles:
                 roles = [r for r in [ctx.guild.get_role(r) for r in roles] if r]
@@ -554,7 +556,7 @@ class RulePush(Cog):
             )
 
         del rulepushes[ctx.channel.name]
-        set_tossfile(ctx.guild.id, "tosses", json.dumps(rulepushes))
+        set_tossfile(ctx.guild.id, "rulepushes", json.dumps(rulepushes))
 
         channel = notify_channel if notify_channel else logging_channel
         if channel:
@@ -702,6 +704,84 @@ class RulePush(Cog):
         await ctx.message.remove_reaction("⏳", self.bot.user)
         await ctx.message.add_reaction("✅")
 
+    @Cog.listener()
+    async def on_message(self, msg: discord.Message):
+        await self.bot.wait_until_ready()
+
+        # let's try to eliminate all messages we don't care about
+        # we must avoid doing any costly operation (e.g. loading a file)
+        # remember this function will get called on *every* message!!
+
+        if msg.guild == None:
+            return
+
+        if not isinstance(msg.channel, discord.TextChannel):
+            return
+
+        # loads the list of rulepushed users if necessary
+        if msg.guild.id not in self.guild_rulepushes:
+            uids: set[int] = set()
+            rulepushes = get_tossfile(msg.guild.id, "rulepushes")
+            if rulepushes:
+                for chan in rulepushes.values():
+                    for uid in chan["rulepushed"]:
+                        uids.add(int(uid))
+            self.guild_rulepushes[msg.guild.id] = uids
+
+        if msg.author.id not in self.guild_rulepushes[msg.guild.id]:
+            return
+
+        # ok if we're here this is a message we care about!
+        # we can safely do more costly things now
+        notify_channel: discord.TextChannel = self.bot.pull_channel(
+            msg.guild,
+            get_config(msg.guild.id, "rulepush", "notificationchannel")
+        )
+
+        rulepushes = get_tossfile(msg.guild.id, "rulepushes")
+        real_codewords: dict[str, list[str]] = get_tossfile(msg.guild.id, "rule-codewords")
+
+        if (
+            not rulepushes or
+            not real_codewords or
+            msg.channel.name not in rulepushes or
+            str(msg.author.id) not in rulepushes[msg.channel.name]["rulepushed"]
+        ):
+            # shouldn't happen but maybe `guild_rulepushes` was wrong?
+            if notify_channel:
+                await notify_channel.send(
+                    f"I feel like I should pay attention to [this message](<{msg.jump_url}>) but I am not 100% sure. I may have lost track of who is rulepushed, a restart could help!"
+                )
+            return
+
+        expected_codewords = set(
+            cw.lower()
+            for cws in real_codewords.values()
+            for cw in cws
+        )
+        submissions: set[str] = (
+            set(rulepushes[msg.channel.name].get("submissions", set()))
+        )
+
+        word = msg.clean_content.strip().lower()
+
+        if word == "done":
+            if submissions >= expected_codewords:
+                await msg.reply(get_config(msg.guild.id, "rulepush", "codewords_done"))
+                await asyncio.sleep(int(get_config(msg.guild.id, "rulepush", "codewords_done_timeout_secs")))
+                await msg.reply("(uhm actually idk how to yet)")
+            else:
+                await msg.reply(get_config(msg.guild.id, "rulepush", "codewords_not_done"))
+        else:
+            submissions.add(word)
+            rulepushes[msg.channel.name]["submissions"] = list(submissions)
+            set_tossfile(msg.guild.id, "rulepushes", json.dumps(rulepushes))
+
+            if word in expected_codewords: 
+                await msg.reply(get_config(msg.guild.id, "rulepush", "codeword_ok"))
+            else:
+                await msg.reply(get_config(msg.guild.id, "rulepush", "codeword_ko"))
+
     def get_session(self, member: discord.Member):
         rulepushes = get_tossfile(member.guild.id, "rulepushes")
         if not rulepushes:
@@ -780,6 +860,7 @@ class RulePush(Cog):
 
         rulepushes = get_tossfile(user.guild.id, "rulepushes")
         rulepushes[rulepush_channel_name]["rulepushed"][str(user.id)] = [role.id for role in roles]
+        self.guild_rulepushes[user.guild.id].add(user.id)
         set_tossfile(user.guild.id, "rulepushes", json.dumps(rulepushes))
 
         await user.add_roles(rulepush_role, reason="User rulepushed.")

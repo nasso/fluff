@@ -90,7 +90,22 @@ rulepush:
   rulepushtopic:
 
   # Message for rulepushes
-  rulepushmsg: 
+  rulepushmsg:
+
+  # Message when a codeword was accepted
+  codeword_ok:
+
+  # Message when a codeword was rejected
+  codeword_ko:
+
+  # Message when the user says "done" and they have found all codewords
+  codewords_done:
+
+  # How much time to wait before rolepulling after all codewords have been found
+  codewords_done_timeout_secs:
+
+  # Message when the user says "done" but they haven't found all codewords
+  codewords_not_done:
 
   # Minimum number of codewords in each rule channel
   codewords_min: 3
